@@ -1,0 +1,174 @@
+name: Build SDL3
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdl3_version:
+        description: "SDL3 release version (e.g. 3.4.2)"
+        required: true
+        type: string
+
+env:
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+            tarball: SDL3-windows-amd64.tar.gz
+          - os: windows-latest
+            arch: x86
+            tarball: SDL3-windows-x86.tar.gz
+            msvc_arch: amd64_x86
+            extra_cmake_args: -DCMAKE_SYSTEM_PROCESSOR=X86 -A Win32
+          - os: windows-11-arm
+            arch: arm64
+            tarball: SDL3-windows-arm64.tar.gz
+    name: Build ${{ matrix.tarball }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: ${{ matrix.msvc_arch }}
+
+      - name: Setup CMake & Ninja
+        uses: lukka/get-cmake@v4.2.3
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Download SDL3 source
+        shell: bash
+        run: |
+          curl -L -o SDL3.tar.gz \
+            "https://github.com/libsdl-org/SDL/releases/download/release-${{ inputs.sdl3_version }}/SDL3-${{ inputs.sdl3_version }}.tar.gz"
+          tar -xzf SDL3.tar.gz
+          mv SDL3-${{ inputs.sdl3_version }} SDL3
+
+      - name: Download libusb
+        shell: bash
+        run: |
+          curl -L -o libusb.7z \
+            "https://github.com/libusb/libusb/releases/download/v1.0.29/libusb-1.0.29.7z"
+          7z x libusb.7z -olibusb
+
+      - name: Determine libusb paths
+        id: libusb
+        shell: bash
+        run: |
+          # libusb release layout: VS2015-x64/lib, VS2015-Win32/lib, etc.
+          # Headers are in include/libusb-1.0/libusb.h
+          case "${{ matrix.arch }}" in
+            x64)   libdir="VS2022/MS64/dll" ; staticdir="VS2022/MS64/static" ;;
+            x86)   libdir="VS2022/MS32/dll" ; staticdir="VS2022/MS32/static" ;;
+            arm64) libdir="VS2022/MS64/dll" ; staticdir="VS2022/MS64/static" ;;
+          esac
+          echo "include_dir=$(pwd)/libusb/include/libusb-1.0" >> $GITHUB_OUTPUT
+          echo "static_lib=$(pwd)/libusb/${staticdir}/libusb-1.0.lib" >> $GITHUB_OUTPUT
+          # Verify files exist
+          ls -la "libusb/include/libusb-1.0/libusb.h"
+          ls -la "libusb/${staticdir}/libusb-1.0.lib"
+
+      - name: Configure SDL3
+        shell: bash
+        run: >-
+          cmake -S SDL3 -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          -DSDL_SHARED=ON
+          -DSDL_STATIC=OFF
+          -DSDL_TEST_LIBRARY=ON
+          -DSDL_TESTS=OFF
+          -DSDL_DISABLE_INSTALL_DOCS=ON
+          -DSDL_RELOCATABLE=ON
+          -DSDL_VENDOR_INFO=encounter/sdl3-build
+          -DSDL_HIDAPI=ON
+          -DSDL_HIDAPI_LIBUSB=ON
+          -DSDL_HIDAPI_LIBUSB_SHARED=OFF
+          -DSDL_LIBC=ON
+          -DCMAKE_INCLUDE_PATH="${{ steps.libusb.outputs.include_dir }}"
+          -DCMAKE_LIBRARY_PATH="${{ steps.libusb.outputs.static_lib }}"
+          ${{ matrix.extra_cmake_args }}
+
+      - name: Verify libusb configuration
+        shell: bash
+        run: |
+          echo "=== Checking SDL_build_config.h ==="
+          config=$(find build -name "SDL_build_config.h" -path "*/release/*" -o -name "SDL_build_config.h" -path "*/Release/*" | head -1)
+          if [ -z "$config" ]; then
+            config=$(find build -name "SDL_build_config.h" | head -1)
+          fi
+          echo "Config file: $config"
+          grep -E "HAVE_LIBUSB|SDL_LIBUSB" "$config"
+          # Verify HAVE_LIBUSB is 1 and SDL_LIBUSB_DYNAMIC is undef
+          grep -q "HAVE_LIBUSB 1" "$config" || (echo "ERROR: HAVE_LIBUSB not defined!" && exit 1)
+          grep -q "undef SDL_LIBUSB_DYNAMIC" "$config" || (echo "ERROR: SDL_LIBUSB_DYNAMIC should be undef!" && exit 1)
+          echo "libusb configuration verified OK"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Install
+        run: cmake --install build --config Release --prefix install
+
+      - name: Verify libusb in binary
+        shell: bash
+        run: |
+          echo "=== Checking SDL3.dll for libusb symbols ==="
+          strings install/bin/SDL3.dll | grep -c "libusb_" || true
+          strings install/bin/SDL3.dll | grep "libusb_init" && echo "libusb statically linked: OK" || echo "WARNING: libusb symbols not found!"
+          # Make sure it does NOT reference libusb-1.0.dll as a dynamic dependency
+          if strings install/bin/SDL3.dll | grep -q "libusb-1.0.dll"; then
+            echo "ERROR: SDL3.dll references libusb-1.0.dll as dynamic dependency!"
+            exit 1
+          fi
+
+      - name: Package
+        shell: bash
+        run: tar -czf ${{ matrix.tarball }} -C install .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.tarball }}
+          path: ${{ matrix.tarball }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.sdl3_version }}
+          name: SDL3 ${{ inputs.sdl3_version }}
+          body: |
+            SDL3 ${{ inputs.sdl3_version }} built with static libusb support.
+
+            Changes from official SDL3 prebuilt packages:
+            - `HAVE_LIBUSB=1` — libusb support compiled in
+            - `SDL_LIBUSB_DYNAMIC` undefined — libusb statically linked into SDL3.dll
+            - No `libusb-1.0.dll` dependency needed at runtime
+
+            This enables support for devices that require libusb on Windows, such as:
+            - Nintendo WUP-028 GameCube Controller Adapter (with WinUSB driver via Zadig)
+            - Other libusb-whitelisted devices
+
+            Based on upstream: https://github.com/libsdl-org/SDL/releases/tag/release-${{ inputs.sdl3_version }}
+          files: "*.tar.gz"
