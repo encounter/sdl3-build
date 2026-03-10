@@ -20,6 +20,7 @@ jobs:
           - os: windows-latest
             arch: x64
             tarball: SDL3-windows-amd64.tar.gz
+            msvc_arch: amd64
           - os: windows-latest
             arch: x86
             tarball: SDL3-windows-x86.tar.gz
