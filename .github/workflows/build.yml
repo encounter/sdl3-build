@@ -64,17 +64,15 @@ jobs:
         id: libusb
         shell: bash
         run: |
-          # libusb release layout: VS2015-x64/lib, VS2015-Win32/lib, etc.
-          # Headers are in include/libusb-1.0/libusb.h
           case "${{ matrix.arch }}" in
             x64)   libdir="VS2022/MS64/dll" ; staticdir="VS2022/MS64/static" ;;
             x86)   libdir="VS2022/MS32/dll" ; staticdir="VS2022/MS32/static" ;;
             arm64) libdir="VS2022/MS64/dll" ; staticdir="VS2022/MS64/static" ;;
           esac
-          echo "include_dir=$(pwd)/libusb/include/libusb-1.0" >> $GITHUB_OUTPUT
+          echo "include_dir=$(pwd)/libusb/include" >> $GITHUB_OUTPUT
           echo "static_lib=$(pwd)/libusb/${staticdir}/libusb-1.0.lib" >> $GITHUB_OUTPUT
           # Verify files exist
-          ls -la "libusb/include/libusb-1.0/libusb.h"
+          ls -la "libusb/include/libusb.h"
           ls -la "libusb/${staticdir}/libusb-1.0.lib"
 
       - name: Configure SDL3
