@@ -24,10 +24,7 @@ jobs:
             arch: x86
             tarball: SDL3-windows-x86.tar.gz
             msvc_arch: amd64_x86
-            extra_cmake_args: -DCMAKE_SYSTEM_PROCESSOR=X86 -A Win32
-          - os: windows-11-arm
-            arch: arm64
-            tarball: SDL3-windows-arm64.tar.gz
+            extra_cmake_args: -DCMAKE_SYSTEM_PROCESSOR=X86
     name: Build ${{ matrix.tarball }}
     runs-on: ${{ matrix.os }}
     steps:
@@ -67,7 +64,6 @@ jobs:
           case "${{ matrix.arch }}" in
             x64)   libdir="VS2022/MS64/dll" ; staticdir="VS2022/MS64/static" ;;
             x86)   libdir="VS2022/MS32/dll" ; staticdir="VS2022/MS32/static" ;;
-            arm64) libdir="VS2022/MS64/dll" ; staticdir="VS2022/MS64/static" ;;
           esac
           echo "include_dir=$(pwd)/libusb/include" >> $GITHUB_OUTPUT
           echo "static_lib=$(pwd)/libusb/${staticdir}/libusb-1.0.lib" >> $GITHUB_OUTPUT
