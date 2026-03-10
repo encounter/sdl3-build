@@ -67,7 +67,7 @@ jobs:
             x86)   libdir="VS2022/MS32/dll" ; staticdir="VS2022/MS32/static" ;;
           esac
           echo "include_dir=$(pwd)/libusb/include" >> $GITHUB_OUTPUT
-          echo "static_lib=$(pwd)/libusb/${staticdir}/libusb-1.0.lib" >> $GITHUB_OUTPUT
+          echo "library_dir=$(pwd)/libusb/${staticdir}" >> $GITHUB_OUTPUT
           # Verify files exist
           ls -la "libusb/include/libusb.h"
           ls -la "libusb/${staticdir}/libusb-1.0.lib"
@@ -91,7 +91,7 @@ jobs:
           -DSDL_HIDAPI_LIBUSB_SHARED=OFF
           -DSDL_LIBC=ON
           -DCMAKE_INCLUDE_PATH="${{ steps.libusb.outputs.include_dir }}"
-          -DCMAKE_LIBRARY_PATH="${{ steps.libusb.outputs.static_lib }}"
+          -DCMAKE_LIBRARY_PATH="${{ steps.libusb.outputs.library_dir }}"
           ${{ matrix.extra_cmake_args }}
 
       - name: Verify libusb configuration
